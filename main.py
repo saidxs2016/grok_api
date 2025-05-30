@@ -393,7 +393,7 @@ Search for real tweets using Grok API with advanced filtering.
   "model": "grok-3-latest",
   "mode": "auto",
   "temperature": 0.2,
-  "max_tokens": 8000,
+  "max_tokens": 120000,
   "response_format": "json"
 }
 ```
