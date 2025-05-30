@@ -79,9 +79,9 @@ class SearchRequest(BaseModel):
         example=0.2
     )
     max_tokens: int = Field(
-        default=4000, 
+        default=8000, 
         ge=100, 
-        le=8000, 
+        le=120000, 
         description="Maximum tokens for AI response",
         example=8000
     )
