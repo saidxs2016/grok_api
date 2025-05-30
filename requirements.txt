@@ -3,6 +3,5 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.0
 requests==2.31.0
 python-multipart==0.0.6
-# Swagger UI ve dokümantasyon için
 jinja2==3.1.2
 python-markdown==3.5.1
