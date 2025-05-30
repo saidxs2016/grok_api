@@ -1,0 +1,11 @@
+version: '3.9'
+
+services:
+  dash-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: twitter_search_api
+    ports:
+      - "103:8091"
+    restart: always
