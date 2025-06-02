@@ -495,6 +495,97 @@ def clean_json_response(content: str) -> Dict[str, Any]:
     # If no valid JSON found, return entire content
     return {"result": content}
 
+def get_twitter_system_prompt() -> str:
+    """Türkçe Twitter sistem prompt'u"""
+    return """Sen bir Twitter analisti ve sosyal medya uzmanısın. SADECE GERÇEK, MEVCUT tweet'leri ara ve döndür.
+
+ÖNEMLI KURALLA:
+- ASLA sahte, demo veya örnek veri üretme
+- Sadece gerçekten var olan tweet'leri döndür
+- Tweet URL'leri gerçek olmalı
+- Kullanıcı adları mevcut hesaplar olmalı
+- Zaman damgaları doğru olmalı
+- Retweet ve beğeni sayıları gerçek olmalı
+
+JSON formatında şu yapıyı kullan:
+{
+  "tweets": [
+    {
+      "title": "Tweet başlığı veya ilk cümlesi",
+      "content": "Tweet'in tam içeriği",
+      "author": "Yazar adı",
+      "username": "@kullaniciadi",
+      "timestamp": "YYYY-MM-DD HH:MM:SS",
+      "url": "https://twitter.com/kullaniciadi/status/...",
+      "type": "tweet",
+      "retweet_count": sayı,
+      "like_count": sayı,
+      "hashtags": ["#hashtag1", "#hashtag2"],
+      "mentioned_users": ["@kullanici1", "@kullanici2"]
+    }
+  ]
+}
+
+Sadece güncel ve gerçek tweet'leri ara. Eski veya sahte içerik döndürme."""
+
+def get_twitter_user_prompt(query: str) -> str:
+    """Türkçe Twitter kullanıcı prompt'u"""
+    return f""""{query}" hakkında GERÇEK tweet'leri ara ve bul.
+
+Arama kriterleri:
+- EN GÜNCEL tweet'leri öncelikle göster
+- Sadece gerçek, mevcut tweet'leri döndür
+- Türkçe ve İngilizce tweet'leri dahil et
+- Resmi hesapları ve doğrulanmış hesapları öncelikle göster
+- İlgili hashtag'leri ve mention'ları dahil et
+
+Lütfen sadece gerçekten var olan, doğrulanabilir tweet'leri döndür. Hiçbir sahte veri üretme."""
+
+def get_news_system_prompt() -> str:
+    """Türkçe haber sistem prompt'u"""
+    return """Sen bir haber analisti ve medya uzmanısın. SADECE GERÇEK, MEVCUT haberleri ara ve döndür.
+
+ÖNEMLI KURALLAR:
+- ASLA sahte, demo veya örnek veri üretme
+- Sadece gerçekten yayınlanmış haberleri döndür
+- Haber URL'leri gerçek olmalı
+- Kaynak siteleri doğrulanabilir olmalı
+- Yayın tarihleri doğru olmalı
+
+JSON formatında şu yapıyı kullan:
+{
+  "news": [
+    {
+      "publish_date": "YYYY-MM-DDTHH:MM:SS",
+      "source": "kaynak-site.com",
+      "title": "Haber başlığı",
+      "summary": "Kısa özet",
+      "description": "Detaylı açıklama",
+      "link": "https://kaynak-site.com/haber-linki",
+      "category": "Kategori",
+      "sentiment": "positive/negative/neutral",
+      "keywords": ["anahtar", "kelimeler"],
+      "tags": ["etiket1", "etiket2"],
+      "author": "Yazar adı"
+    }
+  ]
+}
+
+Sadece güncel ve gerçek haberleri ara. Eski veya sahte içerik döndürme."""
+
+def get_news_user_prompt(query: str) -> str:
+    """Türkçe haber kullanıcı prompt'u"""
+    return f""""{query}" hakkında GERÇEK haberleri ara ve bul.
+
+Arama kriterleri:
+- EN GÜNCEL haberleri öncelikle göster
+- Sadece gerçek, doğrulanabilir haberleri döndür
+- Türkçe ve İngilizce haberleri dahil et
+- Güvenilir kaynaklardan haberleri öncelikle göster
+- İlgili anahtar kelimeleri ve etiketleri dahil et
+
+Lütfen sadece gerçekten yayınlanmış, doğrulanabilir haberleri döndür. Hiçbir sahte veri üretme."""
+
 def make_grok_twitter_request(request: SearchTwittRequest) -> Dict[str, Any]:
     """Make HTTP request to Grok API"""
     url = "https://api.x.ai/v1/chat/completions"
@@ -504,14 +595,14 @@ def make_grok_twitter_request(request: SearchTwittRequest) -> Dict[str, Any]:
         "Authorization": f"Bearer {request.api_key}"
     }
     
-    # Geliştirilmiş prompt'ları kullan
+    # Türkçe prompt'ları kullan
     if request.response_format == "json":
         system_prompt = request.system_prompt or get_twitter_system_prompt()
         user_prompt = request.user_prompt or get_twitter_user_prompt(request.query)
     else:
-        # Raw format için de gerçek tweet vurgusu yap
-        system_prompt = request.system_prompt or "You are a Twitter analyst. Search for REAL, ACTUAL tweets only. Do not generate fake or demo data."
-        user_prompt = request.user_prompt or f'Search for REAL tweets about: "{request.query}". Only return actual tweets that exist.'
+        # Raw format için de Türkçe gerçek tweet vurgusu
+        system_prompt = request.system_prompt or "Sen bir Twitter analistisin. SADECE GERÇEK, MEVCUT tweet'leri ara. Sahte veya demo veri üretme."
+        user_prompt = request.user_prompt or f'"{request.query}" hakkında GERÇEK tweet\'leri ara. Sadece gerçekten var olan tweet\'leri döndür.'
     
     # Build search sources
     sources = [{"type": "x"}]
@@ -525,8 +616,27 @@ def make_grok_twitter_request(request: SearchTwittRequest) -> Dict[str, Any]:
         "sources": sources
     }
     
-    # Add date parameters only if mode is 'off'
+    # Tarih parametreleri - güncel verileri öncelemek için
     if request.mode == "off":
+        # Historical mode - belirtilen tarih aralığını kullan
+        if request.start_date:
+            search_params["from_date"] = request.start_date
+        if request.end_date:
+            search_params["to_date"] = request.end_date
+    elif request.mode == "on":
+        # Live mode - son 7 gün ile sınırla (çok eskiye gitmesin)
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        week_ago = today - timedelta(days=7)
+        search_params["from_date"] = week_ago.strftime("%Y-%m-%d")
+    elif request.mode == "auto":
+        # Auto mode - son 30 gün ile sınırla
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        month_ago = today - timedelta(days=30)
+        search_params["from_date"] = month_ago.strftime("%Y-%m-%d")
+        
+        # Eğer kullanıcı tarih belirtmişse onları da ekle
         if request.start_date:
             search_params["from_date"] = request.start_date
         if request.end_date:
@@ -549,16 +659,16 @@ def make_grok_twitter_request(request: SearchTwittRequest) -> Dict[str, Any]:
         "max_tokens": request.max_tokens
     }
     
-    logger.info(f"Making request to Grok API - Query: {request.query}, Mode: {request.mode}, Format: {request.response_format}")
-    if request.mode == "off":
-        logger.info(f"Date range: {request.start_date} to {request.end_date}")
+    logger.info(f"Twitter araması - Query: {request.query}, Mode: {request.mode}, Format: {request.response_format}")
+    if "from_date" in search_params:
+        logger.info(f"Tarih aralığı: {search_params.get('from_date')} - {search_params.get('to_date', 'şimdi')}")
     
     response = requests.post(url, headers=headers, json=payload)
     
     if response.status_code != 200:
         raise HTTPException(
             status_code=response.status_code, 
-            detail=f"Grok API error: {response.text}"
+            detail=f"Grok API hatası: {response.text}"
         )
     
     return response.json()
@@ -572,29 +682,43 @@ def make_grok_news_request(request: SearchNewsRequest) -> Dict[str, Any]:
         "Authorization": f"Bearer {request.api_key}"
     }
     
-    # Geliştirilmiş prompt'ları kullan
+    # Türkçe prompt'ları kullan
     if request.response_format == "json":
         system_prompt = request.system_prompt or get_news_system_prompt()
         user_prompt = request.user_prompt or get_news_user_prompt(request.query)
     else:
-        # Raw format için de gerçek haber vurgusu yap
-        system_prompt = request.system_prompt or "You are a news analyst. Search for REAL, ACTUAL news only. Do not generate fake or demo data."
-        user_prompt = request.user_prompt or f'Search for REAL news about: "{request.query}". Only return actual news that exists.'
+        # Raw format için de Türkçe gerçek haber vurgusu
+        system_prompt = request.system_prompt or "Sen bir haber analistisin. SADECE GERÇEK, MEVCUT haberleri ara. Sahte veya demo veri üretme."
+        user_prompt = request.user_prompt or f'"{request.query}" hakkında GERÇEK haberleri ara. Sadece gerçekten yayınlanmış haberleri döndür.'
     
     # Build search sources
     sources = [{"type": "web"}, {"type": "news"}]
     
-    # Build search parameters
+    # Tarih parametreleri - güncel haberleri öncelemek için
+    from datetime import datetime, timedelta
+    
+    # Eğer start_date belirtilmemişse, son 30 gün ile sınırla
+    if not request.start_date:
+        today = datetime.now()
+        month_ago = today - timedelta(days=30)
+        from_date = month_ago.strftime("%Y-%m-%d")
+    else:
+        from_date = request.start_date
+    
     search_params = {
-        "from_date": request.start_date,
-        "mode": "on",
+        "from_date": from_date,
+        "mode": "on",  # Haber araması için her zaman "on" kullan
         "max_search_results": request.max_results,
         "sources": sources
     }
     
-    # Add end date if provided
+    # End date ekle
     if request.end_date:
         search_params["to_date"] = request.end_date
+    else:
+        # End date belirtilmemişse bugünü kullan
+        today = datetime.now()
+        search_params["to_date"] = today.strftime("%Y-%m-%d")
     
     payload = {
         "messages": [
@@ -613,21 +737,20 @@ def make_grok_news_request(request: SearchNewsRequest) -> Dict[str, Any]:
         "max_tokens": request.max_tokens
     }
     
-    logger.info(f"Making news request to Grok API - Query: {request.query}, Format: {request.response_format}")
-    logger.info(f"Date range: {request.start_date} to {request.end_date or 'now'}")
+    logger.info(f"Haber araması - Query: {request.query}, Format: {request.response_format}")
+    logger.info(f"Tarih aralığı: {search_params['from_date']} - {search_params.get('to_date', 'şimdi')}")
     
     response = requests.post(url, headers=headers, json=payload)
     
     if response.status_code != 200:
         raise HTTPException(
             status_code=response.status_code, 
-            detail=f"Grok API error: {response.text}"
+            detail=f"Grok API hatası: {response.text}"
         )
     
     return response.json()
 
-
-@app.post("/search_tweets", 
+@app.get("/search_tweets", 
           summary="Search Real Tweets",
           description="""
 Search for real tweets using Grok API with advanced filtering.
@@ -639,21 +762,25 @@ Search for real tweets using Grok API with advanced filtering.
 - ✅ Filters out fake content patterns
 - ✅ JSON and raw response formats
 
-**Example Request Body:**
-```json
-{
-  "query": "MlpCare, MedicalPark, LivHospital",
-  "start_date": "2025-01-01",
-  "end_date": "2025-05-30",
-  "api_key": "xai-your-api-key-here",
-  "max_results": 25,
-  "model": "grok-3-latest",
-  "mode": "auto",
-  "temperature": 0.2,
-  "max_tokens": 120000,
-  "response_format": "json"
-}
+**Example Request:**
 ```
+GET /search_tweets?query=MlpCare,MedicalPark,LivHospital&start_date=2025-01-01&end_date=2025-05-30&api_key=xai-your-api-key-here&max_results=25&model=grok-3-latest&mode=auto&temperature=0.2&max_tokens=120000&response_format=json&handles=MedicalParkHG,mlpcare&system_prompt=Focus%20on%20healthcare
+```
+
+**Query Parameters:**
+- `query` (required): Search keywords or company names
+- `api_key` (required): Your Grok API key
+- `start_date` (optional): Start date for historical search (YYYY-MM-DD)
+- `end_date` (optional): End date for historical search (YYYY-MM-DD)
+- `max_results` (optional, default=25): Maximum number of results (1-100)
+- `model` (optional, default=grok-3-latest): AI model to use
+- `mode` (optional, default=auto): Search mode (on/off/auto)
+- `handles` (optional): Comma-separated Twitter handles (without @)
+- `system_prompt` (optional): Custom system prompt for AI model
+- `user_prompt` (optional): Custom user prompt for specific instructions
+- `temperature` (optional, default=0.2): AI temperature (0.0-2.0)
+- `max_tokens` (optional, default=120000): Maximum response tokens
+- `response_format` (optional, default=json): Response format (json/raw)
 
 **Search Modes:**
 - `on`: Live/recent tweets (default)
@@ -703,9 +830,45 @@ Search for real tweets using Grok API with advanced filtering.
               500: {"description": "API error or no response from Grok"}
           }
 )
-async def search_tweets(request: SearchTwittRequest) -> Union[Dict[str, Any], str]:
+async def search_tweets(
+    query: str,
+    api_key: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    max_results: int = 25,
+    model: str = "grok-3-latest",
+    mode: str = "on",
+    handles: Optional[str] = None,  # Comma-separated handles
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
+    temperature: float = 0.2,
+    max_tokens: int = 120000,
+    response_format: str = "json"
+) -> Union[Dict[str, Any], str]:
     """Search tweets and return response based on format"""
     try:
+        # Convert comma-separated handles to list
+        handles_list = None
+        if handles:
+            handles_list = [h.strip() for h in handles.split(',')]
+        
+        # Create request object from query parameters
+        request = SearchTwittRequest(
+            query=query,
+            api_key=api_key,
+            start_date=start_date,
+            end_date=end_date,
+            max_results=max_results,
+            model=model,
+            mode=mode,
+            handles=handles_list,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format
+        )
+        
         # Make request to Grok API
         response_data = make_grok_twitter_request(request)
         
@@ -753,7 +916,7 @@ async def search_tweets(request: SearchTwittRequest) -> Union[Dict[str, Any], st
         logger.error(f"Search error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/search_news", 
+@app.get("/search_news", 
           summary="Search Real News",
           description="""
 Search for real news using Grok API with advanced filtering.
@@ -765,20 +928,23 @@ Search for real news using Grok API with advanced filtering.
 - ✅ JSON and raw response formats
 - ✅ Sentiment analysis and categorization
 
-**Example Request Body:**
-```json
-{
-  "query": "MlpCare, MedicalPark, LivHospital",
-  "start_date": "2025-01-01",
-  "end_date": "2025-05-30",
-  "api_key": "xai-your-api-key-here",
-  "max_results": 25,
-  "model": "grok-3-latest",
-  "temperature": 0.1,
-  "max_tokens": 8000,
-  "response_format": "json"
-}
+**Example Request:**
 ```
+GET /search_news?query=MlpCare,MedicalPark,LivHospital&start_date=2025-01-01&end_date=2025-05-30&api_key=xai-your-api-key-here&max_results=25&model=grok-3-latest&temperature=0.1&max_tokens=8000&response_format=json&system_prompt=Focus%20on%20healthcare%20news
+```
+
+**Query Parameters:**
+- `query` (required): Search keywords or company names
+- `api_key` (required): Your Grok API key
+- `start_date` (optional, default=2025-01-01): Start date for search (YYYY-MM-DD)
+- `end_date` (optional): End date for search (YYYY-MM-DD)
+- `max_results` (optional, default=25): Maximum number of results (1-100)
+- `model` (optional, default=grok-3-latest): AI model to use
+- `system_prompt` (optional): Custom system prompt for AI model
+- `user_prompt` (optional): Custom user prompt for specific instructions
+- `temperature` (optional, default=0.1): AI temperature (0.0-2.0)
+- `max_tokens` (optional, default=8000): Maximum response tokens
+- `response_format` (optional, default=json): Response format (json/raw)
 
 **Tips for Best Results:**
 - Use specific keywords or company names
@@ -820,9 +986,36 @@ Search for real news using Grok API with advanced filtering.
               500: {"description": "API error or no response from Grok"}
           }
 )
-async def search_news(request: SearchNewsRequest) -> Union[Dict[str, Any], str]:
+async def search_news(
+    query: str,
+    api_key: str,
+    start_date: Optional[str] = "2025-01-01",
+    end_date: Optional[str] = None,
+    max_results: int = 25,
+    model: str = "grok-3-latest",
+    system_prompt: Optional[str] = None,
+    user_prompt: Optional[str] = None,
+    temperature: float = 0.2,
+    max_tokens: int = 120000,
+    response_format: str = "json"
+) -> Union[Dict[str, Any], str]:
     """Search news and return response based on format"""
     try:
+        # Create request object from query parameters
+        request = SearchNewsRequest(
+            query=query,
+            api_key=api_key,
+            start_date=start_date,
+            end_date=end_date,
+            max_results=max_results,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format
+        )
+        
         # Make request to Grok API
         response_data = make_grok_news_request(request)
         
@@ -863,8 +1056,7 @@ async def search_news(request: SearchNewsRequest) -> Union[Dict[str, Any], str]:
         raise HTTPException(status_code=500, detail=f"Request failed: {str(e)}")
     except Exception as e:
         logger.error(f"News search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
+        raise HTTPException(status_code=500, detail=str(e))   
     
 
 @app.get("/models")
